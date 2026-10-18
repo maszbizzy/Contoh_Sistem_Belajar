@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ms">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sistem Permohonan</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --txt:#1d2433; --mut:#6b7385; --acc:#d97757; --line:#dde1ea; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111418; --card:#1b2028; --txt:#e8ebf2; --mut:#9aa3b5; --line:#2c3440; }
+  }
+  body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+  main { max-width:720px; margin:0 auto; padding:16px; }
+  h1 { font-size:22px; }
+  nav { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  nav button { flex:1; min-width:120px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  label { display:block; font-size:14px; margin:10px 0 4px; color:var(--mut); }
+  input, textarea, select { width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--line);
+    border-radius:8px; background:var(--bg); color:var(--txt); font-size:15px; }
+  textarea { min-height:80px; }
+  button { padding:10px 14px; border:0; border-radius:8px; background:var(--acc); color:#fff; font-size:15px; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--txt); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  .msg { margin-top:12px; font-size:14px; }
+  .ok { color:#2e8b57; } .ralat { color:#c0392b; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; background:var(--line); }
+  .row-btn { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .row-btn button { padding:6px 10px; font-size:13px; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Sistem Permohonan</h1>
+  <nav>
+    <button data-tab="hantar">Hantar permohonan</button>
+    <button class="ghost" data-tab="status">Semak status</button>
+    <button class="ghost" data-tab="pegawai">Pegawai</button>
+  </nav>
+
+  <section id="tab-hantar" class="card">
+    <form id="form-hantar">
+      <label for="h-nama">Nama penuh</label>
+      <input id="h-nama" required>
+      <label for="h-emel">Emel</label>
+      <input id="h-emel" type="email" required>
+      <label for="h-jenis">Jenis permohonan</label>
+      <select id="h-jenis">
+        <option>Umum</option>
+        <option>Lain-lain</option>
+      </select>
+      <label for="h-butiran">Butiran</label>
+      <textarea id="h-butiran" required></textarea>
+      <p><button type="submit">Hantar</button></p>
+    </form>
+    <div id="h-msg" class="msg"></div>
+  </section>
+
+  <section id="tab-status" class="card hidden">
+    <form id="form-status">
+      <label for="s-rujukan">Nombor rujukan</label>
+      <input id="s-rujukan" placeholder="PMH-20261018-0001" required>
+      <label for="s-emel">Emel yang digunakan semasa hantar</label>
+      <input id="s-emel" type="email" required>
+      <p><button type="submit">Semak</button></p>
+    </form>
+    <div id="s-msg" class="msg"></div>
+  </section>
+
+  <section id="tab-pegawai" class="card hidden">
+    <label for="p-token">Token pegawai</label>
+    <input id="p-token" type="password">
+    <label for="p-nama">Nama pegawai</label>
+    <input id="p-nama">
+    <p><button id="p-muat">Muat senarai</button></p>
+    <div id="p-msg" class="msg"></div>
+    <div id="p-senarai"></div>
+  </section>
+</main>
+
+<script>
+// Tampal URL Web App dari Apps Script di sini (Deploy > Web app).
+const API = 'PASTE_APPS_SCRIPT_URL_HERE';
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function panggil(action, data = {}, kaedah = 'POST') {
+  if (API.startsWith('PASTE')) throw new Error('URL API belum ditetapkan dalam index.html');
+  let res;
+  if (kaedah === 'GET') {
+    res = await fetch(API + '?' + new URLSearchParams({ action, ...data }));
+  } else {
+    res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain' },
+                             body: JSON.stringify({ action, ...data }) });
+  }
+  const j = await res.json();
+  if (!j.ok) throw new Error(j.error);
+  return j.data;
+}
+
+function papar(el, teks, ok) {
+  el.className = 'msg ' + (ok ? 'ok' : 'ralat');
+  el.textContent = teks;
+}
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.className = x === b ? '' : 'ghost');
+  ['hantar', 'status', 'pegawai'].forEach(t => $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab));
+});
+
+$('form-hantar').onsubmit = async e => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button'); btn.disabled = true;
+  try {
+    const d = await panggil('hantar', {
+      nama: $('h-nama').value, emel: $('h-emel').value,
+      jenis: $('h-jenis').value, butiran: $('h-butiran').value });
+    papar($('h-msg'), 'Permohonan diterima. Nombor rujukan: ' + d.rujukan, true);
+    e.target.reset();
+  } catch (err) { papar($('h-msg'), err.message, false); }
+  btn.disabled = false;
+};
+
+$('form-status').onsubmit = async e => {
+  e.preventDefault();
+  try {
+    const d = await panggil('semak_status', { rujukan: $('s-rujukan').value.trim(), emel: $('s-emel').value }, 'GET');
+    let t = 'Status: ' + d.status;
+    if (d.tarikh_akhir) t += '. Tarikh akhir pembetulan: ' + new Date(d.tarikh_akhir).toLocaleDateString('ms-MY');
+    if (d.nota) t += '. Nota: ' + d.nota;
+    papar($('s-msg'), t, true);
+  } catch (err) { papar($('s-msg'), err.message, false); }
+};
+
+const tokenPegawai = () => $('p-token').value;
+
+$('p-muat').onclick = muatSenarai;
+
+async function muatSenarai() {
+  try {
+    const rows = await panggil('senarai', { token: tokenPegawai() }, 'GET');
+    papar($('p-msg'), rows.length + ' permohonan', true);
+    $('p-senarai').innerHTML = rows.length ? '<table><tr><th>Rujukan</th><th>Nama</th><th>Status</th><th>Tindakan</th></tr>' +
+      rows.map(r => `<tr><td>${esc(r.rujukan)}</td><td>${esc(r.nama)}<br><small>${esc(r.butiran)}</small></td>
+        <td><span class="tag">${esc(r.status)}</span></td>
+        <td>${tindakanUntuk(r.status, r.rujukan)}</td></tr>`).join('') + '</table>' : '<p>Tiada permohonan.</p>';
+  } catch (err) { papar($('p-msg'), err.message, false); }
+}
+
+function tindakanUntuk(status, rujukan) {
+  const b = (label, fn) => `<button class="ghost" data-r="${esc(rujukan)}" data-a="${fn}">${label}</button>`;
+  if (status === 'DIHANTAR') return `<div class="row-btn">${b('Ambil semakan', 'ambil')}</div>`;
+  if (status === 'DISEMAK') return `<div class="row-btn">${b('Lengkap', 'semak-lengkap')}${b('Kurang', 'semak-kurang')}</div>`;
+  if (status === 'MENUNGGU_LULUS') return `<div class="row-btn">${b('Lulus', 'lulus')}${b('Tolak', 'tolak')}</div>`;
+  return '–';
+}
+
+$('p-senarai').onclick = async e => {
+  const btn = e.target.closest('button[data-a]');
+  if (!btn) return;
+  const r = btn.dataset.r, a = btn.dataset.a;
+  const pegawai = $('p-nama').value.trim();
+  if (!pegawai) return papar($('p-msg'), 'Isi nama pegawai dulu', false);
+  const base = { token: tokenPegawai(), rujukan: r, pegawai };
+  try {
+    if (a === 'ambil') await panggil('ambil', base);
+    if (a === 'semak-lengkap') await panggil('semak', { ...base, lengkap: true });
+    if (a === 'semak-kurang') {
+      const senarai_kurang = prompt('Senaraikan dokumen yang kurang');
+      if (!senarai_kurang) return;
+      await panggil('semak', { ...base, lengkap: false, senarai_kurang });
+    }
+    if (a === 'lulus') await panggil('luluskan', { ...base, lulus: true, nota: prompt('Nota (pilihan)') || '' });
+    if (a === 'tolak') {
+      const nota = prompt('Alasan tolak (wajib)');
+      if (!nota) return;
+      await panggil('luluskan', { ...base, lulus: false, nota });
+    }
+    await muatSenarai();
+  } catch (err) { papar($('p-msg'), err.message, false); }
+};
+</script>
+</body>
+</html>
